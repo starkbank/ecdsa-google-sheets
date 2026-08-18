@@ -1,7 +1,8 @@
 function sign(message, privateKey) {
-    let numberMessage = BinaryAscii.numberFromHex(hash(message));
+    let messageHashHex = hash(message);
+    let numberMessage = BinaryAscii.numberFromHex(messageHashHex);
     let curve = privateKey.curve;
-    let randNum = Integer.secureRandomNumber();
+    let randNum = Integer.secureRandomNonce(privateKey.secret, messageHashHex);
     let randSignPoint = EcdsaMath.multiply(curve.G, randNum, curve.N, curve.A, curve.P);
     let r = Integer.modulo(randSignPoint.x, curve.N);
     let sum = (numberMessage + (BigInt(r) * (privateKey.secret)));

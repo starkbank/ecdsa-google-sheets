@@ -11,44 +11,117 @@ Integer.modulo = function(x, n) {
 }
 
 
+Integer._secp256k1_N = BigInt("115792089237316195423570985008687907852837564279074904382605163141518161494337");
+
 Integer.secureRandomNumber = function() {
-    let url = "https://us-central1-api-ms-auth-sbx.cloudfunctions.net/ellipticCurveMath";
-    let payload = {
-      "Gx": "55066263022277343669578718895168534326250603453777594175500187360389116729240",
-      "Gy": "32670510020758816978083085130507043184471273380659243275938904335757337482424",
-      "A": "0",
-      "P": "115792089237316195423570985008687907853269984665640564039457584007908834671663",
-      "N": "115792089237316195423570985008687907852837564279074904382605163141518161494337"
-    };
-    let options = {
-      'method': 'post',
-      'payload': JSON.stringify(payload),
-      'headers': {'Content-Type': 'Application/json'}
-    };
-    let response;
-    let content;
-    let status;
-    try {
-      response = UrlFetchApp.fetch(url, options);
-      content = response.getContentText();
-      status = response.getResponseCode();
-    } catch (e) {
-      if (!e.response) {
-        throw e;
-      }
-      content = e.response.body;
-      status = e.response.statusCode;
-      switch (status) {
-        case 400:
-        case 404:
-          throw new error.InputErrors(content, status);
-        case 500:
-          throw new error.InternalServerError(content, status);
-        default:
-          throw e;
-      }
+    const N = Integer._secp256k1_N;
+
+    while (true) {
+        const entropy = Utilities.getUuid() +
+                       Utilities.getUuid() +
+                       Utilities.getUuid() +
+                       Date.now().toString();
+
+        const hashBytes = Utilities.computeDigest(
+            Utilities.DigestAlgorithm.SHA_256,
+            entropy
+        );
+
+        const randNum = Integer._bytesToBigInt(hashBytes);
+
+        if (randNum >= BigInt(1) && randNum < N) {
+            return randNum;
+        }
     }
-    let mathJson = JSON.parse(content);
-    let randNum = BigInt(mathJson['randNum']);
-    return randNum;
+};
+
+Integer._bytesToBigInt = function(bytes) {
+    let result = BigInt(0);
+    for (let i = 0; i < bytes.length; i++) {
+        result = (result << BigInt(8)) | BigInt(bytes[i] & 0xFF);
+    }
+    return result;
+};
+
+Integer._hmacSha256 = function(key, value) {
+    const keyBlob = Utilities.newBlob(key);
+    const valueBlob = Utilities.newBlob(value);
+
+    const signature = Utilities.computeHmacSignature(
+        Utilities.HmacAlgorithm.HMAC_SHA_256,
+        valueBlob,
+        keyBlob
+    );
+
+    if (typeof signature === 'string') {
+        return signature.split('').map(c => c.charCodeAt(0));
+    }
+    return Array.from(signature);
+};
+
+Integer._hexStringToBytes = function(hexString) {
+    const bytes = [];
+    for (let i = 0; i < hexString.length; i += 2) {
+        bytes.push(parseInt(hexString.substr(i, 2), 16));
+    }
+    return bytes;
+};
+
+Integer.secureRandomNonce = function(privateKeySecret, messageHashHex) {
+    const N = Integer._secp256k1_N;
+
+    const x = Integer._bigIntToBytes(privateKeySecret, 32);
+    const h1 = Integer._hexStringToBytes(messageHashHex);
+
+    let K = new Array(32).fill(0x00);
+    let V = new Array(32).fill(0x01);
+
+    const hmacInput1 = Integer._bytesConcat(
+        V,
+        [0x00],
+        Integer._bytesConcat(x, h1)
+    );
+    K = Integer._hmacSha256(K, hmacInput1);
+
+    V = Integer._hmacSha256(K, V);
+
+    const hmacInput2 = Integer._bytesConcat(
+        V,
+        [0x01],
+        Integer._bytesConcat(x, h1)
+    );
+    K = Integer._hmacSha256(K, hmacInput2);
+
+    V = Integer._hmacSha256(K, V);
+
+    let counter = 0;
+    const maxLoops = 1000;
+
+    while (counter < maxLoops) {
+        V = Integer._hmacSha256(K, V);
+
+        const nonce = Integer._bytesToBigInt(V);
+
+        if (nonce >= BigInt(1) && nonce < N) {
+            return nonce;
+        }
+
+        K = Integer._hmacSha256(K, Integer._bytesConcat(V, [0x00]));
+        V = Integer._hmacSha256(K, V);
+        counter++;
+    }
+
+    throw new Error("RFC 6979: Failed to generate valid nonce after " + maxLoops + " attempts");
+};
+
+Integer._bigIntToBytes = function(num, length) {
+    const bytes = [];
+    for (let i = length - 1; i >= 0; i--) {
+        bytes.push(Number((num >> BigInt(i * 8)) & BigInt(0xFF)));
+    }
+    return bytes;
+};
+
+Integer._bytesConcat = function(...arrays) {
+    return [].concat(...arrays);
 };
