@@ -11,10 +11,8 @@ Integer.modulo = function(x, n) {
 }
 
 
-Integer._secp256k1_N = BigInt("115792089237316195423570985008687907852837564279074904382605163141518161494337");
-
 Integer.secureRandomNumber = function() {
-    const N = Integer._secp256k1_N;
+    const N = Curve.secp256k1.N;
 
     while (true) {
         const entropy = Utilities.getUuid() +
@@ -43,19 +41,22 @@ Integer._bytesToBigInt = function(bytes) {
     return result;
 };
 
-Integer._hmacSha256 = function(key, value) {
-    const keyBlob = Utilities.newBlob(key);
-    const valueBlob = Utilities.newBlob(value);
+// Apps Script Byte[] parameters are Java signed bytes (-128..127); normalize
+// unsigned 0..255 values (and re-normalize already-signed HMAC output) before
+// handing them to computeHmacSignature.
+Integer._toSignedBytes = function(bytes) {
+    return bytes.map(function(byte) {
+        return ((byte & 0xFF) ^ 0x80) - 0x80;
+    });
+};
 
+Integer._hmacSha256 = function(key, value) {
     const signature = Utilities.computeHmacSignature(
-        Utilities.HmacAlgorithm.HMAC_SHA_256,
-        valueBlob,
-        keyBlob
+        Utilities.MacAlgorithm.HMAC_SHA_256,
+        Integer._toSignedBytes(value),
+        Integer._toSignedBytes(key)
     );
 
-    if (typeof signature === 'string') {
-        return signature.split('').map(c => c.charCodeAt(0));
-    }
     return Array.from(signature);
 };
 
@@ -67,51 +68,37 @@ Integer._hexStringToBytes = function(hexString) {
     return bytes;
 };
 
-Integer.secureRandomNonce = function(privateKeySecret, messageHashHex) {
-    const N = Integer._secp256k1_N;
+// RFC 6979 deterministic nonce generator. Yields successive candidates in
+// [1, N) so the caller can request a fresh k when a candidate produces a
+// degenerate signature (r == 0 or s == 0). N and the octet length come from
+// the key's curve rather than being fixed to secp256k1.
+Integer.secureRandomNonce = function* (privateKeySecret, messageHashHex, curve) {
+    const N = curve.N;
+    const byteLength = curve.length();
 
-    const x = Integer._bigIntToBytes(privateKeySecret, 32);
-    const h1 = Integer._hexStringToBytes(messageHashHex);
+    const x = Integer._bigIntToBytes(privateKeySecret, byteLength);
+    const h1Number = Integer._bytesToBigInt(Integer._hexStringToBytes(messageHashHex));
+    const h1 = Integer._bigIntToBytes(Integer.modulo(h1Number, N), byteLength);
 
-    let K = new Array(32).fill(0x00);
-    let V = new Array(32).fill(0x01);
+    let K = new Array(byteLength).fill(0x00);
+    let V = new Array(byteLength).fill(0x01);
 
-    const hmacInput1 = Integer._bytesConcat(
-        V,
-        [0x00],
-        Integer._bytesConcat(x, h1)
-    );
-    K = Integer._hmacSha256(K, hmacInput1);
-
+    K = Integer._hmacSha256(K, Integer._bytesConcat(V, [0x00], x, h1));
+    V = Integer._hmacSha256(K, V);
+    K = Integer._hmacSha256(K, Integer._bytesConcat(V, [0x01], x, h1));
     V = Integer._hmacSha256(K, V);
 
-    const hmacInput2 = Integer._bytesConcat(
-        V,
-        [0x01],
-        Integer._bytesConcat(x, h1)
-    );
-    K = Integer._hmacSha256(K, hmacInput2);
-
-    V = Integer._hmacSha256(K, V);
-
-    let counter = 0;
-    const maxLoops = 1000;
-
-    while (counter < maxLoops) {
+    while (true) {
         V = Integer._hmacSha256(K, V);
 
         const nonce = Integer._bytesToBigInt(V);
-
         if (nonce >= BigInt(1) && nonce < N) {
-            return nonce;
+            yield nonce;
         }
 
         K = Integer._hmacSha256(K, Integer._bytesConcat(V, [0x00]));
         V = Integer._hmacSha256(K, V);
-        counter++;
     }
-
-    throw new Error("RFC 6979: Failed to generate valid nonce after " + maxLoops + " attempts");
 };
 
 Integer._bigIntToBytes = function(num, length) {

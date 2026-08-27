@@ -2,12 +2,26 @@ function sign(message, privateKey) {
     let messageHashHex = hash(message);
     let numberMessage = BinaryAscii.numberFromHex(messageHashHex);
     let curve = privateKey.curve;
-    let randNum = Integer.secureRandomNonce(privateKey.secret, messageHashHex);
-    let randSignPoint = EcdsaMath.multiply(curve.G, randNum, curve.N, curve.A, curve.P);
-    let r = Integer.modulo(randSignPoint.x, curve.N);
-    let sum = (numberMessage + (BigInt(r) * (privateKey.secret)));
-    let s = Integer.modulo(sum * EcdsaMath.inv(randNum, curve.N), curve.N);
-    return new Signature(r, s);
+    let nonces = Integer.secureRandomNonce(privateKey.secret, messageHashHex, curve);
+    let attempts = 0;
+
+    while (attempts < 1000) {
+        attempts++;
+        let randNum = nonces.next().value;
+        let randSignPoint = EcdsaMath.multiply(curve.G, randNum, curve.N, curve.A, curve.P);
+        let r = Integer.modulo(randSignPoint.x, curve.N);
+        if (r == BigInt(0)) {
+            continue;
+        }
+        let sum = numberMessage + (r * privateKey.secret);
+        let s = Integer.modulo(sum * EcdsaMath.inv(randNum, curve.N), curve.N);
+        if (s == BigInt(0)) {
+            continue;
+        }
+        return new Signature(r, s);
+    }
+
+    throw new Error("RFC 6979: failed to produce a valid signature");
 };
 
 

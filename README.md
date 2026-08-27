@@ -27,13 +27,14 @@ console.log(isValid); // true or false
 
 Run all tests:
 ```javascript
-runAllTests(); // Executes 7 tests
+runAllTests(); // Executes 10 tests
 ```
 
 Run specific suites:
 ```javascript
 runAllPhase1Tests();  // CSPRNG validation (4 tests)
 runAllPhase2Tests();  // RFC 6979 validation (3 tests)
+runAllPhase3Tests();  // Negative / security cases (3 tests)
 ```
 
 Tests:
@@ -44,6 +45,9 @@ Tests:
 5. RFC 6979 determinism (same input = same signature)
 6. Different messages produce different signatures
 7. Signature verification works
+8. verify rejects out-of-range r and s
+9. verify rejects malformed signatures without throwing
+10. verify rejects forged point-at-infinity signatures
 
 ## Architecture
 
@@ -55,9 +59,10 @@ sign(message, privateKey)
   └─ return Signature(r, s)
 
 verify(message, signature, publicKey)
-  ├─ Recover point from signature
-  ├─ Compare with expected point
-  └─ return true/false
+  ├─ reject if r or s not in [1, N)
+  ├─ compute u1*G + u2*Q  (u1 = h*s⁻¹, u2 = r*s⁻¹ mod N)
+  ├─ reject if the sum is the point at infinity
+  └─ return (u1*G + u2*Q).x mod N == r
 ```
 
 ## Security Considerations

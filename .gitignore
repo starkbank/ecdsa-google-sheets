@@ -1,3 +1,7 @@
+# clasp — pins a live Apps Script project as the push target; keep local only.
+# Copy .clasp.json.example to .clasp.json and set your own scriptId.
+.clasp.json
+
 # Logs
 logs
 *.log

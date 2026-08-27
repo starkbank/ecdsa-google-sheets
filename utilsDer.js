@@ -95,7 +95,7 @@ Der.encodeConstructed = function (tag, value) {
 
 
 Der.removeSequence = function (string) {
-  _checkSequenceError(string, bytesHex0, "03");
+  _checkSequenceError(string, bytesHex0, "30");
   
   let result = _readLength(string.slice(1));
   let length = result[0];

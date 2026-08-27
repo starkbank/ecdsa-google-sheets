@@ -6,7 +6,12 @@ function easySign(message, privateKeyPem) {
 
 function easyVerify(message, signature, publicKeyPem) {
   let publicKey = PublicKey.fromPem(publicKeyPem)
-  let signatureObject = Signature.fromBase64(signature);
+  let signatureObject;
+  try {
+    signatureObject = Signature.fromBase64(signature);
+  } catch (e) {
+    return false;
+  }
   return verify(message, signatureObject, publicKey);
 }
 
